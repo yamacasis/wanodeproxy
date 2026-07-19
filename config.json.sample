@@ -1,0 +1,23 @@
+{
+  "listeners": [
+    { "port": 8080, "mode": "auto" },
+    { "port": 8443, "mode": "tls" },
+    { "port": 5222, "mode": "chat" },
+    { "port": 8199, "mode": "chat" }
+  ],
+  "bind": "0.0.0.0",
+  "chatUpstream": { "host": "g.whatsapp.net", "port": 5222 },
+  "defaultTlsPort": 443,
+  "allowedDomains": [
+    "whatsapp.net",
+    "whatsapp.com",
+    "wa.me",
+    "fbcdn.net",
+    "facebook.com"
+  ],
+  "timeout": 120000,
+  "handshakeTimeout": 15000,
+  "maxConns": 5000,
+  "verbose": true,
+  "statsInterval": 60000
+}
