@@ -1,0 +1,23 @@
+{
+  "bindAddress": "0.0.0.0",
+  "connectTimeoutMs": 15000,
+
+  "chat": {
+    "listenPorts": [443, 5222, 8443, 8199, 8222, 8080, 80],
+    "target": { "host": "g.whatsapp.net", "port": 443 }
+  },
+
+  "media": {
+    "listenPorts": [587, 7777, 8901],
+    "target": { "host": "mmg.whatsapp.net", "port": 443 }
+  },
+
+  "upstreamProxy": {
+    "enabled": false,
+    "type": "socks5",
+    "host": "127.0.0.1",
+    "port": 1080,
+    "username": null,
+    "password": null
+  }
+}
