@@ -1,6 +1,7 @@
 {
   "bindAddress": "0.0.0.0",
   "connectTimeoutMs": 15000,
+  "debug": false,
 
   "chat": {
     "listenPorts": [443, 5222, 8443, 8199, 8222, 8080, 80],

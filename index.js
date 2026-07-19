@@ -23,6 +23,10 @@ function main() {
     console.log('Upstream proxy disabled — connecting to WhatsApp servers directly.');
   }
 
+  if (cfg.debug) {
+    console.log('Debug logging ENABLED — every connection stage will be logged.');
+  }
+
   startAll(cfg).then((servers) => {
     console.log(`WhatsApp proxy started with ${servers.length} listener(s).`);
   });

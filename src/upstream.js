@@ -16,41 +16,53 @@ const net = require('net');
  * @param {number} destPort
  * @param {object|null} proxy
  * @param {number} [timeoutMs=15000]
+ * @param {function} [log] optional per-stage debug logger, e.g. (msg) => console.log(msg)
  * @returns {Promise<net.Socket>} a connected socket ready to carry traffic
  */
-function connectThroughUpstream(destHost, destPort, proxy, timeoutMs = 15000) {
+function connectThroughUpstream(destHost, destPort, proxy, timeoutMs = 15000, log = () => {}) {
   if (!proxy || proxy.enabled === false) {
-    return directConnect(destHost, destPort, timeoutMs);
+    log(`direct connect: dialing ${destHost}:${destPort}`);
+    return directConnect(destHost, destPort, timeoutMs, log);
   }
 
   const type = String(proxy.type || '').toLowerCase();
   if (type === 'socks5' || type === 'socks') {
-    return socks5Connect(destHost, destPort, proxy, timeoutMs);
+    log(
+      `socks5 connect: dialing proxy ${proxy.host}:${proxy.port} for target ${destHost}:${destPort}` +
+        (proxy.username ? ' (with auth)' : '')
+    );
+    return socks5Connect(destHost, destPort, proxy, timeoutMs, log);
   }
   if (type === 'http' || type === 'https' || type === 'connect') {
-    return httpConnect(destHost, destPort, proxy, timeoutMs);
+    log(`http connect: dialing proxy ${proxy.host}:${proxy.port} for target ${destHost}:${destPort}`);
+    return httpConnect(destHost, destPort, proxy, timeoutMs, log);
   }
   return Promise.reject(
     new Error(`Unsupported upstream proxy type: "${proxy.type}" (use "socks5" or "http")`)
   );
 }
 
-function directConnect(host, port, timeoutMs) {
+function directConnect(host, port, timeoutMs, log = () => {}) {
   return new Promise((resolve, reject) => {
     const socket = net.connect({ host, port });
-    armTimeout(socket, timeoutMs, reject);
+    armTimeout(socket, timeoutMs, (err) => {
+      log(`direct connect: timed out dialing ${host}:${port}`);
+      reject(err);
+    });
     socket.once('connect', () => {
       clearTimeout(socket._connTimer);
+      log(`direct connect: TCP established to ${host}:${port}`);
       resolve(socket);
     });
     socket.once('error', (err) => {
       clearTimeout(socket._connTimer);
+      log(`direct connect: error dialing ${host}:${port}: ${err.message}`);
       reject(err);
     });
   });
 }
 
-function socks5Connect(destHost, destPort, proxy, timeoutMs) {
+function socks5Connect(destHost, destPort, proxy, timeoutMs, log = () => {}) {
   return new Promise((resolve, reject) => {
     const host = proxy.host || '127.0.0.1';
     const port = Number(proxy.port) || 1080;
@@ -62,6 +74,7 @@ function socks5Connect(destHost, destPort, proxy, timeoutMs) {
       if (settled) return;
       settled = true;
       clearTimeout(socket._connTimer);
+      log(`socks5 connect: failed: ${err.message || err}`);
       socket.destroy();
       reject(err instanceof Error ? err : new Error(String(err)));
     };
@@ -69,6 +82,7 @@ function socks5Connect(destHost, destPort, proxy, timeoutMs) {
       if (settled) return;
       settled = true;
       clearTimeout(socket._connTimer);
+      log(`socks5 connect: tunnel established to ${destHost}:${destPort}`);
       socket.removeListener('data', onData);
       resolve(socket);
     };
@@ -89,10 +103,12 @@ function socks5Connect(destHost, destPort, proxy, timeoutMs) {
         const method = buf[1];
         buf = buf.subarray(2);
         if (method === 0x00) {
+          log('socks5 connect: proxy selected no-auth, sending CONNECT request');
           stage = 'request';
           sendRequest();
         } else if (method === 0x02) {
           if (!useAuth) return fail(new Error('SOCKS5: server requires auth but none configured'));
+          log('socks5 connect: proxy requires username/password auth, sending credentials');
           stage = 'auth';
           sendAuth();
         } else if (method === 0xff) {
@@ -107,6 +123,7 @@ function socks5Connect(destHost, destPort, proxy, timeoutMs) {
       if (stage === 'auth') {
         if (buf.length < 2) return;
         if (buf[1] !== 0x00) return fail(new Error('SOCKS5: authentication failed'));
+        log('socks5 connect: auth accepted, sending CONNECT request');
         buf = buf.subarray(2);
         stage = 'request';
         sendRequest();
@@ -120,6 +137,7 @@ function socks5Connect(destHost, destPort, proxy, timeoutMs) {
         if (buf[0] !== 0x05) return fail(new Error('SOCKS5: bad version in connect reply'));
         const rep = buf[1];
         if (rep !== 0x00) return fail(new Error(`SOCKS5: connect failed (code 0x${rep.toString(16)})`));
+        log(`socks5 connect: CONNECT reply ok (code 0x${rep.toString(16)})`);
         const atyp = buf[3];
         let need = 4;
         if (atyp === 0x01) need += 4 + 2;
@@ -143,6 +161,7 @@ function socks5Connect(destHost, destPort, proxy, timeoutMs) {
 
     socket.once('connect', () => {
       // Send greeting once the TCP connection to the proxy is up.
+      log(`socks5 connect: TCP established to proxy ${host}:${port}, sending greeting`);
       const methods = useAuth ? Buffer.from([0x00, 0x02]) : Buffer.from([0x00]);
       socket.write(Buffer.concat([Buffer.from([0x05, methods.length]), methods]));
     });
@@ -176,7 +195,7 @@ function socks5Connect(destHost, destPort, proxy, timeoutMs) {
   });
 }
 
-function httpConnect(destHost, destPort, proxy, timeoutMs) {
+function httpConnect(destHost, destPort, proxy, timeoutMs, log = () => {}) {
   return new Promise((resolve, reject) => {
     const host = proxy.host || '127.0.0.1';
     const port = Number(proxy.port) || 8080;
@@ -187,6 +206,7 @@ function httpConnect(destHost, destPort, proxy, timeoutMs) {
       if (settled) return;
       settled = true;
       clearTimeout(socket._connTimer);
+      log(`http connect: failed: ${err.message || err}`);
       socket.destroy();
       reject(err instanceof Error ? err : new Error(String(err)));
     };
@@ -206,10 +226,12 @@ function httpConnect(destHost, destPort, proxy, timeoutMs) {
       const match = /^HTTP\/\d\.\d\s+(\d{3})/.exec(statusLine);
       if (!match) return fail(new Error(`HTTP CONNECT: malformed status line: "${statusLine}"`));
       const code = Number(match[1]);
+      log(`http connect: proxy responded "${statusLine.trim()}"`);
       if (code !== 200) return fail(new Error(`HTTP CONNECT: proxy returned ${statusLine.trim()}`));
 
       settled = true;
       clearTimeout(socket._connTimer);
+      log(`http connect: tunnel established to ${destHost}:${destPort}`);
       socket.removeListener('data', onData);
       const leftover = buf.subarray(headerEnd + 4);
       if (leftover.length) socket.unshift(leftover);
@@ -219,6 +241,7 @@ function httpConnect(destHost, destPort, proxy, timeoutMs) {
     socket.on('data', onData);
 
     socket.once('connect', () => {
+      log(`http connect: TCP established to proxy ${host}:${port}, sending CONNECT ${destHost}:${destPort}`);
       const target = `${destHost}:${destPort}`;
       let req =
         `CONNECT ${target} HTTP/1.1\r\n` +

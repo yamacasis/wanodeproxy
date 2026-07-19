@@ -26,6 +26,11 @@ const DEFAULT_CONFIG = {
   },
   bindAddress: '0.0.0.0',
   connectTimeoutMs: 15000,
+  // When true, logs every stage of each connection (client accepted, upstream
+  // connect attempt, proxy handshake steps, socket close/error) instead of
+  // just the summary lines. Useful for diagnosing "client connects then
+  // disconnects" issues.
+  debug: false,
 };
 
 function deepMerge(base, override) {
@@ -56,6 +61,7 @@ function loadFromFile(configPath) {
 function applyEnvOverrides(cfg) {
   const env = process.env;
   if (env.WA_BIND_ADDRESS) cfg.bindAddress = env.WA_BIND_ADDRESS;
+  if (env.WA_DEBUG) cfg.debug = env.WA_DEBUG === 'true';
 
   if (env.WA_UPSTREAM_PROXY || env.WA_UPSTREAM_ENABLED === 'true') {
     cfg.upstreamProxy = cfg.upstreamProxy || {};
